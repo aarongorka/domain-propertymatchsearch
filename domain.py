@@ -1,12 +1,16 @@
 #!/usr/bin/env python
 import os, sys
-import urllib, json
-import cPickle as pickle
+import urllib.request
+import json
+import pickle as pickle
 from flask import Flask,jsonify,request
 import gpxpy.geo
 import logging
 import argparse
 import time
+from functools import partial
+from multiprocessing.dummy import Pool as ThreadPool
+import itertools
 
 # Cache results to prevent unintentional abuse of production API. Set "cache" to true to save results to disk and use them in subsequent requests.
 cache = False
@@ -26,12 +30,9 @@ def get_listings():
         r = pickle.load(open('domain.pkl'))
     else:
         logging.info('Pulling 1st page of listings...')
-        try:
-            result = urllib.urlopen('https://rest.domain.com.au/searchservice.svc/search?regions=Sydney%20Region&state=NSW&pcodes=2000')
-        except:
-            raise Exception('Error reaching rest.domain.com.au/searchservice.svc')
-        r = json.load(result.fp)
-        result.close()
+        with urllib.request.urlopen('https://rest.domain.com.au/searchservice.svc/search?regions=Sydney%20Region&state=NSW&pcodes=2000') as url:
+            result = url.read().decode('UTF-8')
+        r = json.loads(result)
         logging.debug('Listings: {}'.format(r))
         if cache:
             save_object(r, 'domain.pkl')
@@ -55,12 +56,10 @@ def get_detailed_info(AdId):
     if cache and file_exists:
         description_result_r = pickle.load(open("domain_{}.pkl".format(AdId)))
     else:
-        try:
-            logging.info('Pulling detailed information for AdId: {}'.format(AdId))
-            description_result = urllib.urlopen('https://rest.domain.com.au/propertydetailsservice.svc/propertydetail/{}'.format(AdId))
-        except:
-            raise Exception('Error reaching rest.domain.com.au/propertydetailsservice.svc')
-        description_result_r = json.load(description_result.fp)
+        logging.info('Pulling detailed information for AdId: {}'.format(AdId))
+        with urllib.request.urlopen('https://rest.domain.com.au/propertydetailsservice.svc/propertydetail/{}'.format(AdId)) as url:
+            result = url.read().decode('UTF-8')
+        description_result_r = json.loads(result)
         logging.debug('Detailed information pulled: {}'.format(description_result_r))
         if cache:
             save_object(description_result_r, "domain_{}.pkl".format(AdId))
@@ -76,35 +75,45 @@ def get_inspections(description_result_r):
     inspection_string = description_result_r['Listings'][0]['Inspections']
     return inspection_string
 
+def build_listings(Listing, latitude=None, longitude=None):
+    """Takes a listing and returns the listing with additional information added and unnecessary information removed"""
+    AdId = Listing['AdId']
+    logging.info('Building dict for AdId: {}'.format(AdId))
+    standard_info = get_standard_info(Listing)
+    description_result_r = get_detailed_info(AdId)
+    description_string = get_description(description_result_r)
+    inspection_string = get_inspections(description_result_r)
+    if latitude != None and longitude != None and standard_info['Latitude'] != None and standard_info['Longitude'] != None:
+        dist = {}
+        try:
+            dist = {u'Distance': gpxpy.geo.haversine_distance(float(standard_info['Latitude']), float(standard_info['Longitude']), float(latitude), float(longitude))}
+        except:
+            logging.critical('Error occurred calculating distance with arguments {}, {}, {} and {} for AdId {}'.format(standard_info['Latitude'], standard_info['Longitude'], latitude, longitude, AdId))
+            dist = {u'Distance': []}
+        logging.debug('Updating standard_info with dist: {}'.format(dist))
+        standard_info.update(dist)
+    listing_dict = {}
+    for d in (standard_info, {u'Description': description_string, u'Inspections': inspection_string}):
+        logging.debug('Merging {} in to listing_dict'.format(d))
+        listing_dict.update(d)
+    logging.debug('Appending dict to return_object: {}'.format(listing_dict))
+    logging.info('Dict built for AdId: {}'.format(AdId))
+    return listing_dict
+
 def build_response(**kwargs):
     """Returns a list of property listings as per required specification"""
     start = time.time()
     logging.info('Building response object')
     return_object = []
-    for Listing in get_listings():
-        AdId = Listing['AdId']
-        logging.info('Building dict for AdId: {}'.format(AdId))
-        standard_info = get_standard_info(Listing)
-        description_result_r = get_detailed_info(AdId)
-        description_string = get_description(description_result_r)
-        inspection_string = get_inspections(description_result_r)
-        if 'latitude' in kwargs and 'longitude' in kwargs and standard_info['Latitude'] != None and standard_info['Longitude'] != None:
-            logging.info('latitude and longitude arguments passed')
-            dist = {}
-            try:
-                dist = {u'Distance': gpxpy.geo.haversine_distance(float(standard_info['Latitude']), float(standard_info['Longitude']), float(kwargs['latitude']), float(kwargs['longitude']))}
-            except:
-                logging.critical('Error occurred calculating distance with arguments {}, {}, {} and {}'.format(standard_info['Latitude'], standard_info['Longitude'], kwargs['latitude'], kwargs['longitude']))
-                dist = {u'Distance': []}
-            logging.debug('Updating standard_info with dist: {}'.format(dist))
-            standard_info.update(dist)
-        listing_dict = {}
-        for d in (standard_info, {u'Description': description_string, u'Inspections': inspection_string}):
-            logging.debug('Merging {} in to listing_dict'.format(d)) 
-            listing_dict.update(d)
-        logging.debug('Appending dict to return_object: {}'.format(listing_dict))
-        return_object.append(listing_dict)
-        logging.info('Dict built for AdId: {}'.format(AdId))
+    pool = ThreadPool(4)
+    if 'latitude' in kwargs and 'longitude' in kwargs:
+        logging.info('latitude and longitude arguments passed')
+        return_object = pool.starmap(build_listings, zip(get_listings(), itertools.repeat(kwargs['latitude']), itertools.repeat(kwargs['longitude'])))
+    else:
+        logging.info('latitude and longitude absent')
+        return_object = pool.starmap(build_listings, zip(get_listings()))# The 'Nothing's here are workarounds for zip() being unable to iterate on None type
+    pool.close()
+    pool.join()
     logging.info('Return object build in {}.'.format(time.time() - start))
     return return_object
 
