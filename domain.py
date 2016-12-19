@@ -31,7 +31,7 @@ def get_listings():
     else:
         logging.info('Pulling 1st page of listings...')
         with urllib.request.urlopen('https://rest.domain.com.au/searchservice.svc/search?regions=Sydney%20Region&state=NSW&pcodes=2000') as url:
-            result = url.read().decode('UTF-8')
+            result = url.read().decode('UTF-8') # .read().decode('UTF-8') required for python3 urllib
         r = json.loads(result)
         logging.debug('Listings: {}'.format(r))
         if cache:
@@ -40,8 +40,9 @@ def get_listings():
     return listings
 
 def get_standard_info(Listing):
-    """Filters standard listing info to desired items"""
+    """Filters standard listing info to desired properties"""
     infos = []
+    # dict comprehension to filter to desired properties
     infos = {k: v for k, v in Listing.items() if k in ['AdId', 'Bathrooms','Bedrooms','Carspaces','Headline','DateUpdated','Latitude','Longitude','Region']}
     return infos
 
@@ -58,7 +59,7 @@ def get_detailed_info(AdId):
     else:
         logging.info('Pulling detailed information for AdId: {}'.format(AdId))
         with urllib.request.urlopen('https://rest.domain.com.au/propertydetailsservice.svc/propertydetail/{}'.format(AdId)) as url:
-            result = url.read().decode('UTF-8')
+            result = url.read().decode('UTF-8') # .read().decode('UTF-8') required for python3 urllib
         description_result_r = json.loads(result)
         logging.debug('Detailed information pulled: {}'.format(description_result_r))
         if cache:
@@ -86,7 +87,7 @@ def build_listings(Listing, latitude=None, longitude=None):
     if latitude != None and longitude != None and standard_info['Latitude'] != None and standard_info['Longitude'] != None:
         dist = {}
         try:
-            dist = {u'Distance': gpxpy.geo.haversine_distance(float(standard_info['Latitude']), float(standard_info['Longitude']), float(latitude), float(longitude))}
+            dist = {u'Distance': gpxpy.geo.haversine_distance(float(standard_info['Latitude']), float(standard_info['Longitude']), float(latitude), float(longitude))} # calculate distance in meters
         except:
             logging.critical('Error occurred calculating distance with arguments {}, {}, {} and {} for AdId {}'.format(standard_info['Latitude'], standard_info['Longitude'], latitude, longitude, AdId))
             dist = {u'Distance': []}
@@ -105,15 +106,17 @@ def build_response(**kwargs):
     start = time.time()
     logging.info('Building response object')
     return_object = []
-    pool = ThreadPool(4)
+    # parallel downloads for faster response; brings the total time from ~16s to ~1s
+    listings = get_listings()
+    pool = ThreadPool(len(listings))
     if 'latitude' in kwargs and 'longitude' in kwargs:
         logging.info('latitude and longitude arguments passed')
-        return_object = pool.starmap(build_listings, zip(get_listings(), itertools.repeat(kwargs['latitude']), itertools.repeat(kwargs['longitude'])))
+        return_object = pool.starmap(build_listings, zip(listings, itertools.repeat(kwargs['latitude']), itertools.repeat(kwargs['longitude'])))
     else:
         logging.info('latitude and longitude absent')
-        return_object = pool.starmap(build_listings, zip(get_listings()))# The 'Nothing's here are workarounds for zip() being unable to iterate on None type
+        return_object = pool.starmap(build_listings, zip(listings))
     pool.close()
-    pool.join()
+    pool.join() # wait for parallel requests to complete
     logging.info('Return object build in {}.'.format(time.time() - start))
     return return_object
 
@@ -132,6 +135,7 @@ def get_property_match_search():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    # pass --debug to enable flask debug and debug logging
     parser.add_argument('--debug', '-d', action='store_true', dest='debug_enabled', help='Enable verbose output')
     args = parser.parse_args()
     if args.debug_enabled:
