@@ -6,10 +6,10 @@ from flask import Flask,jsonify,request
 import gpxpy.geo
 import logging
 
-dummy = False
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
-# Cache results to prevent unintentional abuse of production API
+# Cache results to prevent unintentional abuse of production API. Set "cache" to true to save results to disk and use those instead.
+cache = False
 def save_object(obj, filename):
     with open(filename, 'wb') as output:
         pickle.dump(obj, output, pickle.HIGHEST_PROTOCOL)
@@ -17,12 +17,12 @@ def save_object(obj, filename):
 def get_listings():
     """Returns a list of listings on the first page"""
     file_exists = False
-    if dummy:
+    if cache:
         try:
             file_exists = os.stat("domain.pkl")
         except:
             pass
-    if dummy == True and file_exists:
+    if cache == True and file_exists:
         r = pickle.load(open('domain.pkl'))
     else:
         result = urllib.urlopen('https://rest.domain.com.au/searchservice.svc/search?regions=Sydney%20Region&state=NSW&pcodes=2000')
@@ -41,12 +41,12 @@ def get_standard_info(Listing):
 def get_detailed_info(AdId):
     """Returns extended detail set for a given AdId"""
     file_exists = False
-    if dummy:
+    if cache:
         try:
             file_exists = os.stat("domain_{}.pkl".format(AdId))
         except:
             pass
-    if dummy and file_exists:
+    if cache and file_exists:
         description_result_r = pickle.load(open("domain_{}.pkl".format(AdId)))
     else:
         description_result = urllib.urlopen('https://rest.domain.com.au/propertydetailsservice.svc/propertydetail/{}'.format(AdId))
