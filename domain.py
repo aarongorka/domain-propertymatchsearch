@@ -1,13 +1,15 @@
 #!/usr/bin/env python
-import os
+import os, sys
 import urllib, json
 import cPickle as pickle
-from flask import Flask,jsonify
+from flask import Flask,jsonify,request
+import gpxpy.geo
+import logging
 
-dummy = True
+dummy = False
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
-app = Flask(__name__)
-
+# Cache results to prevent unintentional abuse of production API
 def save_object(obj, filename):
     with open(filename, 'wb') as output:
         pickle.dump(obj, output, pickle.HIGHEST_PROTOCOL)
@@ -62,7 +64,8 @@ def get_inspections(description_result_r):
     inspection_string = description_result_r['Listings'][0]['Inspections']
     return inspection_string
 
-def build_response():
+def build_response(**kwargs):
+    """Returns a list of property listings as per required specification"""
     return_object = []
     for Listing in get_listings():
         AdId = Listing['AdId']
@@ -70,15 +73,34 @@ def build_response():
         description_result_r = get_detailed_info(AdId)
         description_string = get_description(description_result_r)
         inspection_string = get_inspections(description_result_r)
+        if 'latitude' in kwargs and 'longitude' in kwargs:
+            logging.info('latitude and longitude arguments passed')
+            dist = {}
+            try:
+                dist = {u'Distance': gpxpy.geo.haversine_distance(float(standard_info['Latitude']), float(standard_info['Longitude']), float(kwargs['latitude']), float(kwargs['longitude']))}
+            except:
+                print(kwargs['latitude'])
+                print(kwargs['longitude'])
+                dist = {u'Distance': []}
+            standard_info.update(dist)
         listing_dict = {}
         for d in (standard_info, {u'Description': description_string, u'Inspections': inspection_string}):
             listing_dict.update(d)
         return_object.append(listing_dict)
     return return_object
 
+app = Flask(__name__)
 @app.route('/PropertyMatchSearch', methods=['GET'])
 def get_property_match_search():
-    return jsonify(build_response())
+    try:
+        latitude = request.args.get('latitude')
+        longitude = request.args.get('longitude')
+    except:
+        pass
+    if latitude and longitude:
+        return jsonify(build_response(latitude=latitude, longitude=longitude))
+    else:
+        return jsonify(build_response())
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run()
