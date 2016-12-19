@@ -73,14 +73,13 @@ def build_response(**kwargs):
         description_result_r = get_detailed_info(AdId)
         description_string = get_description(description_result_r)
         inspection_string = get_inspections(description_result_r)
-        if 'latitude' in kwargs and 'longitude' in kwargs:
+        if 'latitude' in kwargs and 'longitude' in kwargs and standard_info['Latitude'] != None and standard_info['Longitude'] != None:
             logging.info('latitude and longitude arguments passed')
             dist = {}
             try:
                 dist = {u'Distance': gpxpy.geo.haversine_distance(float(standard_info['Latitude']), float(standard_info['Longitude']), float(kwargs['latitude']), float(kwargs['longitude']))}
             except:
-                print(kwargs['latitude'])
-                print(kwargs['longitude'])
+                logging.critical('Error occurred calculating distance with arguments {}, {}, {} and {}'.format(standard_info['Latitude'], standard_info['Longitude'], kwargs['latitude'], kwargs['longitude']))
                 dist = {u'Distance': []}
             standard_info.update(dist)
         listing_dict = {}
