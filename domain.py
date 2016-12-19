@@ -103,4 +103,4 @@ def get_property_match_search():
 
 if __name__ == '__main__':
     logging.info('Starting up...')
-    app.run(host'0.0.0.0')
+    app.run(host='0.0.0.0')
