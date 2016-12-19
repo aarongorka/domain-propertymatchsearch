@@ -102,4 +102,5 @@ def get_property_match_search():
         return jsonify(build_response())
 
 if __name__ == '__main__':
-    app.run()
+    logging.info('Starting up...')
+    app.run(host'0.0.0.0')
